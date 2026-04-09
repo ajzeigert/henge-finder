@@ -1,0 +1,41 @@
+body {
+	margin: 0;
+	padding: 0;
+}
+html,
+body,
+#map {
+	height: 100%;
+}
+
+.season-slider {
+	padding: 10px;
+	min-width: 200px;
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+
+	/* box-sizing: border-box; */
+}
+
+@scope (.season-slider) {
+	h3 {
+		margin-top: 0;
+		margin-bottom: 0;
+	}
+
+	.season-slider-labels {
+		display: flex;
+		justify-content: space-between;
+	}
+
+	input {
+		/* display: block; */
+		/* width: 100%; */
+		margin-bottom: 10px;
+	}
+
+	button {
+		all: revert !important;
+	}
+}
