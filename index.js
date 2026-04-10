@@ -1,11 +1,42 @@
 const maplibregl = window.maplibregl;
 const SunCalc = window.SunCalc;
 const turf = window.turf;
+// console.log("window", window);
 
 // inspiration ish? https://suncalc.net/
 
 // let center = [-1.826111, 51.178889];
-const stoneHenge = new maplibregl.LngLat(-1.826111, 51.178889);
+const stoneHenge = new maplibregl.LngLat(-1.825819, 51.179203);
+
+// Meeus algorithm
+
+function jdeToDate(jde) {
+	return new Date((jde - 2440587.5) * 86400000);
+}
+
+function getSolstice(year, type) {
+	const Y = (year - 2000) / 1000;
+	let jde;
+
+	if (type === "summer") {
+		jde =
+			2451716.56767 +
+			365241.62603 * Y +
+			0.00325 * Y ** 2 +
+			0.07257 * Y ** 3 -
+			0.05823 * Y ** 4 -
+			0.01119 * Y ** 5;
+	} else {
+		jde =
+			2451900.05952 +
+			365242.74049 * Y -
+			0.06223 * Y ** 2 -
+			0.00823 * Y ** 3 +
+			0.00032 * Y ** 4;
+	}
+
+	return jdeToDate(jde);
+}
 
 const state = {
 	date: new Date(),
@@ -128,125 +159,196 @@ map.addControl(
 	"top-left",
 );
 
+// esri world imagery
+//
+// {
+//   type: 'raster',
+//   tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/til
+// e/{z}/{y}/{x}'],
+//   tileSize: 256,
+//   attribution: 'Esri, Maxar, Earthstar Geographics'
+// }
+
 map.setStyle("https://tiles.openfreemap.org/styles/bright", {
 	transformStyle: (previousStyle, nextStyle) => {
 		// nextStyle.projection = { type: "globe" };
-		// nextStyle.sources = {
-		// 	...nextStyle.sources,
-		// 	satelliteSource: {
-		// 		type: "raster",
-		// 		tiles: [
-		// 			"https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg",
-		// 		],
-		// 		tileSize: 256,
-		// 	},
-		// };
+		nextStyle.sources = {
+			...nextStyle.sources,
+			satelliteSource: {
+				type: "raster",
+				tiles: [
+					// "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2020_3857/default/g/{z}/{y}/{x}.jpg",
+					"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+				],
+				tileSize: 256,
+			},
+		};
 
-		// const firstNonFillLayer = nextStyle.layers.find(
-		// 	(layer) => layer.type !== "!fill" && layer.type !== "background",
-		// );
-		// nextStyle.layers.splice(nextStyle.layers.indexOf(firstNonFillLayer), 0, {
-		// 	id: "satellite",
-		// 	type: "raster",
-		// 	source: "satelliteSource",
-		// 	layout: { visibility: "visible" },
-		// 	paint: { "raster-opacity": 1 },
-		// });
+		const firstNonFillLayer = nextStyle.layers.find(
+			(layer) => layer.type !== "fill" && layer.type !== "background",
+		);
+		nextStyle.layers.splice(nextStyle.layers.indexOf(firstNonFillLayer), 0, {
+			id: "satellite",
+			type: "raster",
+			source: "satelliteSource",
+			layout: { visibility: "visible" },
+			paint: { "raster-opacity": 1 },
+		});
 		return nextStyle;
 	},
 });
 
 // const sunriseStr = `${times.sunrise.getHours()}:${times.sunrise.getMinutes()}`;
 
-function getBearingLines({
-	date = new Date(),
-	center = [0, 0],
-	elevation = 0.1,
-}) {
-	const times = SunCalc.getTimes(date, center.lat, center.lng, elevation);
+function getBearingLine({ time, center, properties = {} }) {
+	const position = SunCalc.getPosition(time, center.lat, center.lng);
 
-	const sunrisePos = SunCalc.getPosition(times.sunrise, center.lat, center.lng);
-
-	const sunsetPos = SunCalc.getPosition(times.sunset, center.lat, center.lng);
-
-	const sunriseBearing = ((sunrisePos.azimuth * 180) / Math.PI + 180) % 360;
-
-	const sunsetBearing = ((sunsetPos.azimuth * 180) / Math.PI + 180) % 360;
+	const bearing = ((position.azimuth * 180) / Math.PI + 180) % 360;
 
 	const origin = turf.point(center.toArray());
 
-	const sunriseHorizonPoint = turf.destination(
-		origin,
-		state.bearingLength,
-		sunriseBearing,
-		{
-			units: "kilometers",
-		},
-	);
+	const horizonPoint = turf.destination(origin, state.bearingLength, bearing, {
+		units: "kilometers",
+	});
 
-	const sunsetHorizonPoint = turf.destination(
-		origin,
-		state.bearingLength,
-		sunsetBearing,
-		{
-			units: "kilometers",
-		},
-	);
-
-	const sunriseAzimuthLine = turf.greatCircle(
+	const azimuthLine = turf.greatCircle(
 		center.toArray(),
-		sunriseHorizonPoint.geometry.coordinates,
+		horizonPoint.geometry.coordinates,
 		{
-			properties: {
-				type: "sunrise",
-			},
+			properties,
 		},
 	);
 
-	const sunsetAzimuthLine = turf.greatCircle(
-		center.toArray(),
-		sunsetHorizonPoint.geometry.coordinates,
-		{
-			properties: {
-				type: "sunset",
-			},
-		},
+	return { bearing, horizonPoint, azimuthLine };
+}
+
+function getOverlayGeometry({
+	date = new Date(),
+	center = { lat: 0, lng: 0 },
+	elevation = 0.1,
+}) {
+	const times = SunCalc.getTimes(date, center.lat, center.lng, elevation);
+	const summerSolsticeTimes = SunCalc.getTimes(
+		getSolstice(2026, "summer"),
+		center.lat,
+		center.lng,
+		elevation,
 	);
+	const winterSolsticeTimes = SunCalc.getTimes(
+		getSolstice(2026, "winter"),
+		center.lat,
+		center.lng,
+		elevation,
+	);
+	// console.log("times", times);
+	state.times = times;
+
+	const { azimuthLine: sunriseAzimuthLine } = getBearingLine({
+		time: times.sunrise,
+		center,
+		properties: { type: "sunrise" },
+	});
+	const { azimuthLine: sunsetAzimuthLine } = getBearingLine({
+		time: times.sunset,
+		center,
+		properties: { type: "sunset" },
+	});
+	const { azimuthLine: sunsetMaxAzimuthLine, bearing: sunsetMaxBearing } =
+		getBearingLine({
+			time: summerSolsticeTimes.sunset,
+			center,
+			properties: { type: "maxSunset" },
+		});
+	const { azimuthLine: sunsetMinAzimuthLine, bearing: sunsetMinBearing } =
+		getBearingLine({
+			time: winterSolsticeTimes.sunset,
+			center,
+			properties: { type: "minSunset" },
+		});
+	const { azimuthLine: sunriseMaxAzimuthLine, bearing: sunriseMaxBearing } =
+		getBearingLine({
+			time: summerSolsticeTimes.sunrise,
+			center,
+			properties: { type: "maxSunset" },
+		});
+	const { azimuthLine: sunriseMinAzimuthLine, bearing: sunriseMinBearing } =
+		getBearingLine({
+			time: winterSolsticeTimes.sunrise,
+			center,
+			properties: { type: "minSunset" },
+		});
 
 	function horizonRadius(elevationMeters) {
 		const R = 6371000; // meters
 		return Math.sqrt(2 * R * elevationMeters) / 1000; //kim
 	}
 
-	const horizonCircle = turf.circle(
-		turf.point(center.toArray()),
-		horizonRadius(2),
-		{
-			units: "kilometers",
-			steps: 64,
-			properties: {
-				type: "horizon",
-			},
+	const c = turf.point(center.toArray());
+
+	const horizonCircle = turf.circle(c, horizonRadius(2), {
+		units: "kilometers",
+		steps: 64,
+		properties: {
+			type: "horizon",
 		},
+	});
+
+	const azimuthLimitCircle = turf.circle(c, state.bearingLength, {
+		units: "kilometers",
+		steps: 64,
+		properties: {
+			type: "azimuthLimitCircle",
+		},
+	});
+
+	const sunsetRangeArc = turf.lineArc(
+		c,
+		state.bearingLength,
+		sunsetMinBearing,
+		sunsetMaxBearing,
 	);
 
-	const azimuthLimitCircle = turf.circle(
-		turf.point(center.toArray()),
+	const sunriseRangeArc = turf.lineArc(
+		c,
 		state.bearingLength,
-		{
-			units: "kilometers",
-			steps: 64,
-			properties: {
-				type: "azimuthLimitCircle",
-			},
-		},
+		sunriseMaxBearing,
+		sunriseMinBearing,
+	);
+
+	const sunsetRangePolygon = turf.polygon(
+		[
+			[
+				center.toArray(),
+				...sunsetRangeArc.geometry.coordinates,
+				center.toArray(),
+			],
+		],
+		{ type: "sunsetRange" },
+	);
+	const sunriseRangePolygon = turf.polygon(
+		[
+			[
+				center.toArray(),
+				...sunriseRangeArc.geometry.coordinates,
+				center.toArray(),
+			],
+		],
+		{ type: "sunriseRange" },
 	);
 
 	return turf.featureCollection([
 		sunriseAzimuthLine,
 		sunsetAzimuthLine,
 		horizonCircle,
-		azimuthLimitCircle,
+		sunsetRangePolygon,
+		sunriseRangePolygon,
+		// azimuthLimitCircle,
+		// sunsetMaxAzimuthLine,
+		// sunsetMinAzimuthLine,
+		// sunriseMaxAzimuthLine,
+		// sunriseMinAzimuthLine,
+		// sunsetRangeArc,
+		// sunriseRangeArc,
 	]);
 }
 // map.on("moveend", (e) => {
@@ -343,7 +445,7 @@ map.on("load", () => {
 function updateHenge() {
 	const { date, lngLat, elevation } = state;
 	map.getSource("sun-lines").setData(
-		getBearingLines({
+		getOverlayGeometry({
 			date,
 			center: lngLat,
 			elevation,
