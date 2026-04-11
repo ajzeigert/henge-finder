@@ -53,8 +53,7 @@ class SeasonControl {
 	onAdd(map) {
 		this._map = map;
 		this._container = document.createElement("div");
-		this._container.className =
-			"maplibregl-ctrl maplibregl-ctrl-group season-slider";
+		this._container.className = "maplibregl-ctrl season-slider";
 
 		const header = document.createElement("h3");
 		header.innerText = "Henge Finder";
@@ -62,27 +61,24 @@ class SeasonControl {
 		const labels = document.createElement("div");
 		labels.className = "season-slider-labels";
 		labels.innerHTML =
-			"<span>Winter</span><span>Equinox</span><span>Summer</span>";
+			"<span>Winter</span><span>Spring</span><span>Summer</span><span>Autumn</span><span>Winter</span>";
 
 		const slider = document.createElement("input");
 		slider.type = "range";
 		slider.className = "season-range";
 		slider.min = 0;
-		slider.max = 182;
+		slider.max = 365;
 		slider.value = this._dateToSlider(new Date());
 		slider.setAttribute("list", "season-list");
 
 		const dataList = document.createElement("datalist");
 		dataList.id = "season-list";
 
-		const dataListOption1 = document.createElement("option");
-		dataListOption1.value = 91;
-		const dataListOption2 = document.createElement("option");
-		dataListOption2.value = 0;
-		const dataListOption3 = document.createElement("option");
-		dataListOption3.value = 182;
-
-		dataList.append(dataListOption1, dataListOption2, dataListOption3);
+		[0, 91, 182, 273, 365].forEach((v) => {
+			const dataListOption = document.createElement("option");
+			dataListOption.value = v;
+			dataList.append(dataListOption);
+		});
 
 		const dateInput = document.createElement("input");
 		dateInput.type = "date";
@@ -95,11 +91,26 @@ class SeasonControl {
 			this._onChange(date);
 		});
 
+		const dateContainer = document.createElement("div");
+		dateContainer.className = "date-container";
+
 		dateInput.addEventListener("input", () => {
 			const date = new Date(`${dateInput.value}T12:00:00`);
 			slider.value = this._dateToSlider(date);
 			this._onChange(date);
 		});
+
+		const nowButton = document.createElement("button");
+		nowButton.innerText = "Now";
+
+		nowButton.addEventListener("click", () => {
+			const date = new Date();
+			slider.value = this._dateToSlider(date);
+			dateInput.value = date.toISOString().split("T")[0];
+			this._onChange(date);
+		});
+
+		dateContainer.append(dateInput, nowButton);
 
 		const resetMarkerButton = document.createElement("button");
 		resetMarkerButton.innerText = "Re-Center Marker";
@@ -116,7 +127,7 @@ class SeasonControl {
 			labels,
 			slider,
 			dataList,
-			dateInput,
+			dateContainer,
 			resetMarkerButton,
 		);
 
@@ -128,14 +139,21 @@ class SeasonControl {
 	}
 	_dateToSlider(date) {
 		const year = date.getFullYear();
-		const winterSolstice = new Date(year, 11, 21);
+		let winterSolstice = new Date(year, 11, 21);
 		let days = Math.round((date - winterSolstice) / 86400000);
-		if (days < 0) days += 365;
-		return Math.min(days, 182);
+		if (days < 0) {
+			winterSolstice = new Date(year - 1, 11, 21);
+			days = Math.round((date - winterSolstice) / 86400000);
+		}
+		return Math.min(days, 365);
 	}
 	_sliderToDate(days) {
-		const winterSolstice = new Date(new Date().getFullYear(), 11, 21);
-		return new Date(winterSolstice.getTime() + days * 86400000);
+		const now = new Date();
+		const year = now.getFullYear();
+		const thisYearSolstice = new Date(year, 11, 21);
+		const base =
+			thisYearSolstice > now ? new Date(year - 1, 11, 21) : thisYearSolstice;
+		return new Date(base.getTime() + days * 86400000);
 	}
 }
 
@@ -147,15 +165,23 @@ const map = new maplibregl.Map({
 	hash: true,
 });
 
-const marker = new maplibregl.Marker({ draggable: true })
+const centerMarker = new maplibregl.Marker({ draggable: true })
 	.setLngLat(stoneHenge)
 	.addTo(map);
+
+const sunriseMarker = new maplibregl.Marker({ draggable: true });
+// .setLngLat(new maplibregl.LngLat())
+// .addTo(map);
+
+const sunsetMarker = new maplibregl.Marker({ draggable: true });
+// .setLngLat(new maplibregl.LngLat(sunsetPoint))
+// .addTo(map);
 
 map.addControl(
 	new SeasonControl((date) => {
 		state.date = date;
 		updateHenge();
-	}, marker),
+	}, centerMarker),
 	"top-left",
 );
 
@@ -172,6 +198,7 @@ map.addControl(
 map.setStyle("https://tiles.openfreemap.org/styles/bright", {
 	transformStyle: (previousStyle, nextStyle) => {
 		// nextStyle.projection = { type: "globe" };
+		console.log("nextStyle.layers", nextStyle.layers);
 		nextStyle.sources = {
 			...nextStyle.sources,
 			satelliteSource: {
@@ -184,10 +211,10 @@ map.setStyle("https://tiles.openfreemap.org/styles/bright", {
 			},
 		};
 
-		const firstNonFillLayer = nextStyle.layers.find(
-			(layer) => layer.type !== "fill" && layer.type !== "background",
+		const lastFillLayer = nextStyle.layers.findLast(
+			(layer) => layer.type === "fill",
 		);
-		nextStyle.layers.splice(nextStyle.layers.indexOf(firstNonFillLayer), 0, {
+		nextStyle.layers.splice(nextStyle.layers.indexOf(lastFillLayer), 0, {
 			id: "satellite",
 			type: "raster",
 			source: "satelliteSource",
@@ -243,16 +270,18 @@ function getOverlayGeometry({
 	// console.log("times", times);
 	state.times = times;
 
-	const { azimuthLine: sunriseAzimuthLine } = getBearingLine({
-		time: times.sunrise,
-		center,
-		properties: { type: "sunrise" },
-	});
-	const { azimuthLine: sunsetAzimuthLine } = getBearingLine({
-		time: times.sunset,
-		center,
-		properties: { type: "sunset" },
-	});
+	const { azimuthLine: sunriseAzimuthLine, horizonPoint: sunrisePoint } =
+		getBearingLine({
+			time: times.sunrise,
+			center,
+			properties: { type: "sunrise" },
+		});
+	const { azimuthLine: sunsetAzimuthLine, horizonPoint: sunsetPoint } =
+		getBearingLine({
+			time: times.sunset,
+			center,
+			properties: { type: "sunset" },
+		});
 	const { azimuthLine: sunsetMaxAzimuthLine, bearing: sunsetMaxBearing } =
 		getBearingLine({
 			time: summerSolsticeTimes.sunset,
@@ -434,7 +463,7 @@ map.on("load", () => {
 		paint: { "line-color": "#ff6600", "line-width": 2 },
 	});
 
-	marker.on("drag", (e) => {
+	centerMarker.on("drag", (e) => {
 		// console.log("drag fired");
 		state.lngLat = e.target.getLngLat();
 		updateHenge();

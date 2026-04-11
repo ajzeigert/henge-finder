@@ -9,11 +9,15 @@ body,
 }
 
 .season-slider {
-	padding: 10px;
-	min-width: 200px;
+	/* padding: 10px; */
+	min-width: 30vw;
 	display: flex;
 	flex-direction: column;
 	justify-content: space-between;
+	background: white;
+	border-radius: 4px;
+	box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1);
+	padding: 8px;
 
 	/* box-sizing: border-box; */
 }
@@ -29,13 +33,15 @@ body,
 		justify-content: space-between;
 	}
 
-	input {
+	.date-container {
+		display: flex;
+		justify-content: space-between;
+	}
+
+	input,
+	button {
 		/* display: block; */
 		/* width: 100%; */
 		margin-bottom: 10px;
-	}
-
-	button {
-		all: revert !important;
 	}
 }
