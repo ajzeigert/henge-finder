@@ -163,6 +163,9 @@ const map = new maplibregl.Map({
 	center: stoneHenge,
 	zoom: 15,
 	hash: true,
+	attributionControl: {
+		customAttribution: `Share photo: <a href="https://commons.wikimedia.org/wiki/File:Stonehenge84.jpg">Salix alba at en.wikipedia</a>, <a href="http://creativecommons.org/licenses/by-sa/3.0/">CC BY-SA 3.0</a>`,
+	},
 });
 
 const centerMarker = new maplibregl.Marker({ draggable: true })
