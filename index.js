@@ -1,12 +1,73 @@
 const maplibregl = window.maplibregl;
 const SunCalc = window.SunCalc;
 const turf = window.turf;
-// console.log("window", window);
 
-// inspiration ish? https://suncalc.net/
+// prior art https://suncalc.net/
 
-// let center = [-1.826111, 51.178889];
+// initial point
 const stoneHenge = new maplibregl.LngLat(-1.825819, 51.179203);
+
+// initial state
+const state = {
+	date: new Date(),
+	lngLat: stoneHenge,
+	elevation: 2,
+	bearingLength: 20,
+	sunsetMaxBearing: null,
+	sunsetMinBearing: null,
+	sunriseMaxBearing: null,
+	sunriseMinBearing: null,
+};
+
+SunCalc.getDateForAzimuth = (targetBearing, lat, lng, type = "sunrise") => {
+	const phi = (lat * Math.PI) / 180;
+	const A = (targetBearing * Math.PI) / 180;
+
+	// At horizon: cos(A) = sin(δ) / cos(φ), so solve for declination)
+	const sinDec = Math.cos(phi) * Math.cos(A);
+	if (Math.abs(sinDec) > 1) return null; // azimuth unreachable at this latitude
+	const decDeg = (Math.asin(sinDec) * 180) / Math.PI;
+
+	// Invert approximate declination formula: δ ≈ -23.45° × cos(2π(d+10)/365)
+	const cosArg = -decDeg / 23.45;
+	if (Math.abs(cosArg) > 1) return null;
+	const theta = Math.acos(cosArg);
+	const d1 = (365 * theta) / (2 * Math.PI) - 10; // ascending toward summer
+	const d2 = 355 - (365 * theta) / (2 * Math.PI); //descending toward winter
+
+	const now = new Date();
+	const year = now.getFullYear();
+	const todayDOY = (now - new Date(year, 0, 1)) / 86400000;
+
+	function bearingForDOY(doy) {
+		const date = new Date(year, 0, doy);
+		const times = SunCalc.getTimes(date, lat, lng);
+		const eventTime = type === "sunrise" ? times.sunrise : times.sunset;
+		const pos = SunCalc.getPosition(eventTime, lat, lng);
+		return ((pos.azimuth * 180) / Math.PI + 180) % 360;
+	}
+
+	function refine(d) {
+		const f0 = bearingForDOY(d) - targetBearing;
+		const f1 = bearingForDOY(d + 1) - targetBearing;
+		const slope = f1 - f0;
+		if (Math.abs(slope) > 0.001) return d; // near solstice, barely changing
+		return d - f0 / slope;
+	}
+
+	const r1 = refine(d1);
+	const r2 = refine(d2);
+
+	// Return nearest upcoming occurrence
+	function nextOccurrence(doy) {
+		if (doy > todayDOY) return new Date(year, 0, Math.round(doy));
+		return new Date(year + 1, 0, Math.round(doy));
+	}
+
+	const date1 = nextOccurrence(r1);
+	const date2 = nextOccurrence(r2);
+	return date1 < date2 ? date1 : date2;
+};
 
 // Meeus algorithm
 
@@ -38,123 +99,118 @@ function getSolstice(year, type) {
 	return jdeToDate(jde);
 }
 
-const state = {
-	date: new Date(),
-	lngLat: stoneHenge,
-	elevation: 2,
-	bearingLength: 50,
-};
+const headerContainer = document.getElementById("henge-header");
+headerContainer.className = "season-slider";
 
-class SeasonControl {
-	constructor(onChange, marker) {
-		this._onChange = onChange;
-		this._marker = marker;
+const header = document.createElement("h3");
+header.innerText = "Henge Finder";
+// header.className = "space-grotesk-500";
+
+const labels = document.createElement("div");
+labels.className = "season-slider-labels";
+labels.innerHTML =
+	"<span>Winter</span><span>Spring</span><span>Summer</span><span>Autumn</span><span>Winter</span>";
+
+const slider = document.createElement("input");
+slider.type = "range";
+slider.className = "season-range";
+slider.min = 0;
+slider.max = 365;
+slider.value = dateToSlider(new Date());
+slider.setAttribute("list", "season-list");
+
+const dataList = document.createElement("datalist");
+dataList.id = "season-list";
+
+[0, 91, 182, 273, 365].forEach((v) => {
+	const dataListOption = document.createElement("option");
+	dataListOption.value = v;
+	dataList.append(dataListOption);
+});
+
+const dateInput = document.createElement("input");
+dateInput.type = "date";
+dateInput.className = "season-date";
+dateInput.value = new Date().toISOString().split("T")[0];
+
+slider.addEventListener("input", () => {
+	const date = sliderToDate(parseInt(slider.value, 10));
+	dateInput.value = date.toISOString().split("T")[0];
+	state.date = date;
+	updateHenge();
+});
+
+const dateContainer = document.createElement("div");
+dateContainer.className = "date-container";
+
+dateInput.addEventListener("input", () => {
+	const date = new Date(`${dateInput.value}T12:00:00`);
+	slider.value = dateToSlider(date);
+	state.date = date;
+	updateHenge();
+});
+
+const nowButton = document.createElement("button");
+nowButton.innerText = "Now";
+
+nowButton.addEventListener("click", () => {
+	const date = new Date();
+	slider.value = dateToSlider(date);
+	dateInput.value = date.toISOString().split("T")[0];
+	state.date = date;
+	updateHenge();
+});
+
+dateContainer.append(dateInput, nowButton);
+
+const resetMarkerButton = document.createElement("button");
+resetMarkerButton.innerText = "Re-Center Marker";
+resetMarkerButton.type = "button";
+
+resetMarkerButton.addEventListener("click", () => {
+	state.lngLat = map.getCenter();
+	centerMarker.setLngLat(state.lngLat);
+	updateHenge();
+});
+
+const version = document.createElement("small");
+version.innerHTML =
+	"Version 0.5.1 | © 2026 <a href='https://mastodon.social/@zeigert'>@zeigert</a>";
+
+headerContainer.append(
+	header,
+	labels,
+	slider,
+	dataList,
+	dateContainer,
+	resetMarkerButton,
+	version,
+);
+
+function setDate(incomingDate) {
+	// const incomingDate = new Date(date);
+	if (!incomingDate) return;
+	slider.value = dateToSlider(incomingDate);
+	dateInput.value = incomingDate.toISOString().split("T")[0];
+}
+
+function dateToSlider(date) {
+	const year = date.getFullYear();
+	let winterSolstice = new Date(year, 11, 21);
+	let days = Math.round((date - winterSolstice) / 86400000);
+	if (days < 0) {
+		winterSolstice = new Date(year - 1, 11, 21);
+		days = Math.round((date - winterSolstice) / 86400000);
 	}
-	onAdd(map) {
-		this._map = map;
-		this._container = document.createElement("div");
-		this._container.className = "maplibregl-ctrl season-slider";
-
-		const header = document.createElement("h3");
-		header.innerText = "Henge Finder";
-
-		const labels = document.createElement("div");
-		labels.className = "season-slider-labels";
-		labels.innerHTML =
-			"<span>Winter</span><span>Spring</span><span>Summer</span><span>Autumn</span><span>Winter</span>";
-
-		const slider = document.createElement("input");
-		slider.type = "range";
-		slider.className = "season-range";
-		slider.min = 0;
-		slider.max = 365;
-		slider.value = this._dateToSlider(new Date());
-		slider.setAttribute("list", "season-list");
-
-		const dataList = document.createElement("datalist");
-		dataList.id = "season-list";
-
-		[0, 91, 182, 273, 365].forEach((v) => {
-			const dataListOption = document.createElement("option");
-			dataListOption.value = v;
-			dataList.append(dataListOption);
-		});
-
-		const dateInput = document.createElement("input");
-		dateInput.type = "date";
-		dateInput.className = "season-date";
-		dateInput.value = new Date().toISOString().split("T")[0];
-
-		slider.addEventListener("input", () => {
-			const date = this._sliderToDate(parseInt(slider.value, 10));
-			dateInput.value = date.toISOString().split("T")[0];
-			this._onChange(date);
-		});
-
-		const dateContainer = document.createElement("div");
-		dateContainer.className = "date-container";
-
-		dateInput.addEventListener("input", () => {
-			const date = new Date(`${dateInput.value}T12:00:00`);
-			slider.value = this._dateToSlider(date);
-			this._onChange(date);
-		});
-
-		const nowButton = document.createElement("button");
-		nowButton.innerText = "Now";
-
-		nowButton.addEventListener("click", () => {
-			const date = new Date();
-			slider.value = this._dateToSlider(date);
-			dateInput.value = date.toISOString().split("T")[0];
-			this._onChange(date);
-		});
-
-		dateContainer.append(dateInput, nowButton);
-
-		const resetMarkerButton = document.createElement("button");
-		resetMarkerButton.innerText = "Re-Center Marker";
-		resetMarkerButton.type = "button";
-
-		resetMarkerButton.addEventListener("click", () => {
-			state.lngLat = this._map.getCenter();
-			this._marker.setLngLat(state.lngLat);
-			updateHenge();
-		});
-
-		this._container.append(
-			header,
-			labels,
-			slider,
-			dataList,
-			dateContainer,
-			resetMarkerButton,
-		);
-
-		return this._container;
-	}
-	onRemove() {
-		this._container.remove();
-		this._map = undefined;
-	}
-	_dateToSlider(date) {
-		const year = date.getFullYear();
-		let winterSolstice = new Date(year, 11, 21);
-		let days = Math.round((date - winterSolstice) / 86400000);
-		if (days < 0) {
-			winterSolstice = new Date(year - 1, 11, 21);
-			days = Math.round((date - winterSolstice) / 86400000);
-		}
-		return Math.min(days, 365);
-	}
-	_sliderToDate(days) {
-		const now = new Date();
-		const year = now.getFullYear();
-		const thisYearSolstice = new Date(year, 11, 21);
-		const base =
-			thisYearSolstice > now ? new Date(year - 1, 11, 21) : thisYearSolstice;
-		return new Date(base.getTime() + days * 86400000);
-	}
+	return Math.min(days, 365);
+}
+function sliderToDate(days) {
+	const now = new Date();
+	const year = now.getFullYear();
+	const thisYearSolstice = new Date(year, 11, 21);
+	const base =
+		thisYearSolstice > now ? new Date(year - 1, 11, 21) : thisYearSolstice;
+	return new Date(base.getTime() + days * 86400000);
 }
 
 const map = new maplibregl.Map({
@@ -180,28 +236,10 @@ const sunsetMarker = new maplibregl.Marker({ draggable: true });
 // .setLngLat(new maplibregl.LngLat(sunsetPoint))
 // .addTo(map);
 
-map.addControl(
-	new SeasonControl((date) => {
-		state.date = date;
-		updateHenge();
-	}, centerMarker),
-	"top-left",
-);
-
-// esri world imagery
-//
-// {
-//   type: 'raster',
-//   tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/til
-// e/{z}/{y}/{x}'],
-//   tileSize: 256,
-//   attribution: 'Esri, Maxar, Earthstar Geographics'
-// }
-
 map.setStyle("https://tiles.openfreemap.org/styles/bright", {
 	transformStyle: (previousStyle, nextStyle) => {
 		// nextStyle.projection = { type: "globe" };
-		console.log("nextStyle.layers", nextStyle.layers);
+		// console.log("nextStyle.layers", nextStyle.layers);
 		nextStyle.sources = {
 			...nextStyle.sources,
 			satelliteSource: {
@@ -211,6 +249,7 @@ map.setStyle("https://tiles.openfreemap.org/styles/bright", {
 					"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
 				],
 				tileSize: 256,
+				attribution: "Esri, Maxar, Earthstar Geographics",
 			},
 		};
 
@@ -229,12 +268,12 @@ map.setStyle("https://tiles.openfreemap.org/styles/bright", {
 });
 
 // const sunriseStr = `${times.sunrise.getHours()}:${times.sunrise.getMinutes()}`;
-
-function getBearingLine({ time, center, properties = {} }) {
+function getBearing({ time, center }) {
 	const position = SunCalc.getPosition(time, center.lat, center.lng);
-
-	const bearing = ((position.azimuth * 180) / Math.PI + 180) % 360;
-
+	return ((position.azimuth * 180) / Math.PI + 180) % 360;
+}
+function getBearingLine({ time, center, properties = {} }) {
+	const bearing = getBearing({ time, center });
 	const origin = turf.point(center.toArray());
 
 	const horizonPoint = turf.destination(origin, state.bearingLength, bearing, {
@@ -257,6 +296,7 @@ function getOverlayGeometry({
 	center = { lat: 0, lng: 0 },
 	elevation = 0.1,
 }) {
+	if (!date) return;
 	const times = SunCalc.getTimes(date, center.lat, center.lng, elevation);
 	const summerSolsticeTimes = SunCalc.getTimes(
 		getSolstice(2026, "summer"),
@@ -285,30 +325,26 @@ function getOverlayGeometry({
 			center,
 			properties: { type: "sunset" },
 		});
-	const { azimuthLine: sunsetMaxAzimuthLine, bearing: sunsetMaxBearing } =
-		getBearingLine({
-			time: summerSolsticeTimes.sunset,
-			center,
-			properties: { type: "maxSunset" },
-		});
-	const { azimuthLine: sunsetMinAzimuthLine, bearing: sunsetMinBearing } =
-		getBearingLine({
-			time: winterSolsticeTimes.sunset,
-			center,
-			properties: { type: "minSunset" },
-		});
-	const { azimuthLine: sunriseMaxAzimuthLine, bearing: sunriseMaxBearing } =
-		getBearingLine({
-			time: summerSolsticeTimes.sunrise,
-			center,
-			properties: { type: "maxSunset" },
-		});
-	const { azimuthLine: sunriseMinAzimuthLine, bearing: sunriseMinBearing } =
-		getBearingLine({
-			time: winterSolsticeTimes.sunrise,
-			center,
-			properties: { type: "minSunset" },
-		});
+	const { bearing: sunsetMaxBearing } = getBearingLine({
+		time: summerSolsticeTimes.sunset,
+		center,
+		properties: { type: "maxSunset" },
+	});
+	const { bearing: sunsetMinBearing } = getBearingLine({
+		time: winterSolsticeTimes.sunset,
+		center,
+		properties: { type: "minSunset" },
+	});
+	const { bearing: sunriseMaxBearing } = getBearingLine({
+		time: summerSolsticeTimes.sunrise,
+		center,
+		properties: { type: "maxSunset" },
+	});
+	const { bearing: sunriseMinBearing } = getBearingLine({
+		time: winterSolsticeTimes.sunrise,
+		center,
+		properties: { type: "minSunset" },
+	});
 
 	function horizonRadius(elevationMeters) {
 		const R = 6371000; // meters
@@ -325,13 +361,13 @@ function getOverlayGeometry({
 		},
 	});
 
-	const azimuthLimitCircle = turf.circle(c, state.bearingLength, {
-		units: "kilometers",
-		steps: 64,
-		properties: {
-			type: "azimuthLimitCircle",
-		},
-	});
+	// const azimuthLimitCircle = turf.circle(c, state.bearingLength, {
+	// 	units: "kilometers",
+	// 	steps: 64,
+	// 	properties: {
+	// 		type: "azimuthLimitCircle",
+	// 	},
+	// });
 
 	const sunsetRangeArc = turf.lineArc(
 		c,
@@ -355,7 +391,11 @@ function getOverlayGeometry({
 				center.toArray(),
 			],
 		],
-		{ type: "sunsetRange" },
+		{
+			type: "sunsetRange",
+			maxBearing: sunsetMaxBearing,
+			minBearing: sunsetMinBearing,
+		},
 	);
 	const sunriseRangePolygon = turf.polygon(
 		[
@@ -365,81 +405,31 @@ function getOverlayGeometry({
 				center.toArray(),
 			],
 		],
-		{ type: "sunriseRange" },
+		{
+			type: "sunriseRange",
+			maxBearing: sunriseMaxBearing,
+			minBearing: sunriseMinBearing,
+		},
 	);
 
-	return turf.featureCollection([
+	const geojson = turf.featureCollection([
 		sunriseAzimuthLine,
 		sunsetAzimuthLine,
 		horizonCircle,
 		sunsetRangePolygon,
 		sunriseRangePolygon,
-		// azimuthLimitCircle,
-		// sunsetMaxAzimuthLine,
-		// sunsetMinAzimuthLine,
-		// sunriseMaxAzimuthLine,
-		// sunriseMinAzimuthLine,
-		// sunsetRangeArc,
-		// sunriseRangeArc,
 	]);
-}
-// map.on("moveend", (e) => {
-// 	console.log("movend event", e);
-// 	console.log(map.getCenter());
-// 	marker.setLngLat(map.getCenter());
-// });
 
-// const map = new maplibregl.Map({
-// 	container: "map",
-// 	zoom: 12,
-// 	center: [11.39085, 47.27574],
-// 	pitch: 70,
-// 	hash: true,
-// 	style: {
-// 		version: 8,
-// 		sources: {
-// 			osm: {
-// 				type: "raster",
-// 				tiles: ["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"],
-// 				tileSize: 256,
-// 				attribution: "&copy; OpenStreetMap Contributors",
-// 				maxzoom: 19,
-// 			},
-// 			// Use a different source for terrain and hillshade layers, to improve render quality
-// 			terrainSource: {
-// 				type: "raster-dem",
-// 				url: "https://demotiles.maplibre.org/terrain-tiles/tiles.json",
-// 				tileSize: 256,
-// 			},
-// 			hillshadeSource: {
-// 				type: "raster-dem",
-// 				url: "https://demotiles.maplibre.org/terrain-tiles/tiles.json",
-// 				tileSize: 256,
-// 			},
-// 		},
-// 		layers: [
-// 			{
-// 				id: "osm",
-// 				type: "raster",
-// 				source: "osm",
-// 			},
-// 			{
-// 				id: "hills",
-// 				type: "hillshade",
-// 				source: "hillshadeSource",
-// 				layout: { visibility: "visible" },
-// 				paint: { "hillshade-shadow-color": "#473B24" },
-// 			},
-// 		],
-// 		terrain: {
-// 			source: "terrainSource",
-// 			exaggeration: 1,
-// 		},
-// 		sky: {},
-// 	},
-// 	maxZoom: 18,
-// 	maxPitch: 85,
-// });
+	return {
+		geojson,
+		sunriseMinBearing,
+		sunriseMaxBearing,
+		sunsetMinBearing,
+		sunsetMaxBearing,
+		sunrisePoint,
+		sunsetPoint,
+	};
+}
 
 map.addControl(
 	new maplibregl.NavigationControl({
@@ -449,15 +439,10 @@ map.addControl(
 	}),
 );
 
-map.on("load", () => {
+map.on("load", async () => {
 	map.addSource("sun-lines", {
 		type: "geojson",
 		data: {},
-		// data: getBearingLines({
-		// 	date: new Date(),
-		// 	center: marker.getLngLat(),
-		// 	elevation,
-		// }),
 	});
 	map.addLayer({
 		id: "sun-lines",
@@ -466,23 +451,128 @@ map.on("load", () => {
 		paint: { "line-color": "#ff6600", "line-width": 2 },
 	});
 
+	updateHenge();
+
+	const overlayGeometry = await map.getSource("sun-lines").getData();
+
+	// console.log("overlayGeometry", overlayGeometry);
+
+	const sunsetCoordArray = overlayGeometry.features.find(
+		(f) => f.properties.type === "sunset",
+	).geometry.coordinates;
+	const sunriseCoordArray = overlayGeometry.features.find(
+		(f) => f.properties.type === "sunrise",
+	).geometry.coordinates;
+
+	sunsetMarker.setLngLat(
+		new maplibregl.LngLat(...sunsetCoordArray[sunsetCoordArray.length - 1]),
+	);
+
+	sunriseMarker.setLngLat(
+		new maplibregl.LngLat(...sunriseCoordArray[sunsetCoordArray.length - 1]),
+	);
+
+	function horizonPointHandler(e, type) {
+		const bearing = turf.bearing(
+			state.lngLat.toArray(),
+			e.target.getLngLat().toArray(),
+		);
+		const clampedBearing = clampBearing(
+			bearing,
+			state[`${type}MinBearing`],
+			state[`${type}MaxBearing`],
+		);
+		// console.log("clampledBearing", clampedBearing);
+		// console.log(state);
+		// const atTerminus =
+		// 	bearing > state[`${type}MinBearing`] ||
+		// 	bearing < state[`${type}MaxBearing`];
+		// console.log("atTerminus", atTerminus);
+		// if (atTerminus) return;
+
+		const snapped = turf.destination(
+			state.lngLat.toArray(),
+			state.bearingLength,
+			clampedBearing,
+			{ units: "kilometers" },
+		);
+
+		e.target.setLngLat(snapped.geometry.coordinates);
+
+		state.date = SunCalc.getDateForAzimuth(
+			clampedBearing,
+			state.lngLat.lat,
+			state.lngLat.lng,
+			type,
+		);
+		setDate(state.date);
+		updateHenge();
+	}
+
+	function clampBearing(bearing, a, b) {
+		bearing = ((bearing % 360) + 360) % 360; // normalize
+		const lo = Math.min(a, b);
+		const hi = Math.max(a, b);
+		if (bearing >= lo && bearing <= hi) return bearing;
+
+		const distToMin = Math.min(
+			Math.abs(bearing - lo),
+			360 - Math.abs(bearing - lo),
+		);
+		const distToMax = Math.min(
+			Math.abs(bearing - hi),
+			360 - Math.abs(bearing - hi),
+		);
+		return distToMin < distToMax ? lo : hi;
+	}
+
+	sunriseMarker.addTo(map).on("drag", (e) => horizonPointHandler(e, "sunrise"));
+	sunsetMarker.addTo(map).on("drag", (e) => horizonPointHandler(e, "sunset"));
+
+	sunriseMarker
+		.addTo(map)
+		.on("dragend", (e) => horizonPointHandler(e, "sunrise"));
+	sunsetMarker
+		.addTo(map)
+		.on("dragend", (e) => horizonPointHandler(e, "sunset"));
 	centerMarker.on("drag", (e) => {
 		// console.log("drag fired");
 		state.lngLat = e.target.getLngLat();
 		updateHenge();
 	});
-	updateHenge();
 });
 
 function updateHenge() {
 	const { date, lngLat, elevation } = state;
-	map.getSource("sun-lines").setData(
-		getOverlayGeometry({
-			date,
-			center: lngLat,
-			elevation,
-		}),
-	);
+	if (!date) return;
+	const {
+		geojson,
+		sunriseMinBearing,
+		sunriseMaxBearing,
+		sunsetMinBearing,
+		sunsetMaxBearing,
+		sunsetPoint,
+		sunrisePoint,
+	} = getOverlayGeometry({
+		date,
+		center: lngLat,
+		elevation,
+	});
+	Object.assign(state, {
+		sunriseMinBearing,
+		sunriseMaxBearing,
+		sunsetMinBearing,
+		sunsetMaxBearing,
+	});
+	// console.log("sunrisePoint", sunrisePoint);
+	sunriseMarker
+		.setLngLat(new maplibregl.LngLat(...sunrisePoint.geometry.coordinates))
+		.setDraggable(true);
+	sunsetMarker
+		.setLngLat(new maplibregl.LngLat(...sunsetPoint.geometry.coordinates))
+		.setDraggable(true);
+	// console.log("overlayGeometry", overlayGeometry);
+	map.getSource("sun-lines").setData(geojson);
 }
 
 // map.addControl(

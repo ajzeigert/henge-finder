@@ -1,11 +1,52 @@
+html,
+body {
+	height: 100vh;
+	width: 100vw;
+	font-family: "DM Sans", sans-serif;
+	font-optical-sizing: auto;
+	font-weight: 400;
+	font-style: normal;
+}
+
 body {
 	margin: 0;
 	padding: 0;
+	display: flex;
+	flex-direction: column;
+	flex-wrap: no-wrap;
+	justify-content: space-between;
+	align-items: stretch;
+	box-sizing: content-box;
 }
-html,
-body,
+
+#henge-header {
+	border: 4px black solid;
+	border-radius: 0;
+	border-bottom: unset;
+}
+
 #map {
 	height: 100%;
+	flex: 0 1 auto;
+	font-family: "Space Grotesk", sans-serif;
+	font-optical-sizing: auto;
+	font-weight: 700;
+	font-style: normal;
+	border: 4px black solid;
+}
+
+.space-grotesk-500 {
+	font-family: "Space Grotesk", sans-serif;
+	font-optical-sizing: auto;
+	font-weight: 500;
+	font-style: normal;
+}
+
+.dm-sans-400 {
+	font-family: "DM Sans", sans-serif;
+	font-optical-sizing: auto;
+	font-weight: 400;
+	font-style: normal;
 }
 
 .season-slider {

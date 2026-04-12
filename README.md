@@ -7,6 +7,18 @@
 - [x] Show a date picker that alternatively allows the user to select a specific date
   - When the date picker is changed, it should modify the solstice/equinox slider
   - When the slider is changed, it should modify the date pick relative to the date selected
-- [ ] Show the minimum and maximum for sunrise/sunset
+- [x] Show the minimum and maximum for sunrise/sunset
 - [ ] Display sunrise and sunset lines as different colors
-- [ ] Add "grabbers" to the lines along the circle, allow user to move the lines, which will update the date/slider
+- [x] Add "grabbers" to the lines along the circle, allow user to move the lines, which will update the date/slider
+- [x] Add all the share card stuff and a favicon
+- [ ] Add search bar
+- [ ] Add a drop down that will whoosh to a bunch of famous henges on earth, both time and date
+- [ ] Maybe the map control becomes a top bar instead?
+- [ ] Show sunset and sunrise times as labels or somewhere on the map
+- [ ] Add an about section? What is this thing? Why is this thing?
+- [ ] Save points/times?
+- [ ] Print view?
+- [ ] Poster generator?
+- [ ] Hash link to time/place
+- [ ] Download calendar .ico file with link?
+- [ ] Custom fonts (Space Grotesk and DM Sans?)
