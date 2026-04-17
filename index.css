@@ -28,10 +28,10 @@ body {
 #map {
 	height: 100%;
 	flex: 0 1 auto;
-	font-family: "Space Grotesk", sans-serif;
-	font-optical-sizing: auto;
-	font-weight: 700;
-	font-style: normal;
+	/* font-family: "Space Grotesk", sans-serif; */
+	/* font-optical-sizing: auto; */
+	/* font-weight: 700; */
+	/* font-style: normal; */
 	border: 4px black solid;
 }
 

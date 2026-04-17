@@ -12,14 +12,23 @@ const state = {
 	date: new Date(),
 	lngLat: stoneHenge,
 	elevation: 2,
-	bearingLength: 20,
+	bearingLength: 100,
+	bearingPixelRadius: 180,
+	sunriseBearing: null,
+	sunsetBearing: null,
 	sunsetMaxBearing: null,
 	sunsetMinBearing: null,
 	sunriseMaxBearing: null,
 	sunriseMinBearing: null,
 };
 
-SunCalc.getDateForAzimuth = (targetBearing, lat, lng, type = "sunrise") => {
+SunCalc.getDateForAzimuth = (
+	targetBearing,
+	lat,
+	lng,
+	type = "sunrise",
+	referenceDate = new Date(),
+) => {
 	const phi = (lat * Math.PI) / 180;
 	const A = (targetBearing * Math.PI) / 180;
 
@@ -29,7 +38,7 @@ SunCalc.getDateForAzimuth = (targetBearing, lat, lng, type = "sunrise") => {
 	const decDeg = (Math.asin(sinDec) * 180) / Math.PI;
 
 	// Invert approximate declination formula: δ ≈ -23.45° × cos(2π(d+10)/365)
-	const cosArg = -decDeg / 23.45;
+	const cosArg = Math.max(-1, Math.min(1, -decDeg / 23.45));
 	if (Math.abs(cosArg) > 1) return null;
 	const theta = Math.acos(cosArg);
 	const d1 = (365 * theta) / (2 * Math.PI) - 10; // ascending toward summer
@@ -37,7 +46,7 @@ SunCalc.getDateForAzimuth = (targetBearing, lat, lng, type = "sunrise") => {
 
 	const now = new Date();
 	const year = now.getFullYear();
-	const todayDOY = (now - new Date(year, 0, 1)) / 86400000;
+	// const todayDOY = (now - new Date(year, 0, 1)) / 86400000;
 
 	function bearingForDOY(doy) {
 		const date = new Date(year, 0, doy);
@@ -51,22 +60,22 @@ SunCalc.getDateForAzimuth = (targetBearing, lat, lng, type = "sunrise") => {
 		const f0 = bearingForDOY(d) - targetBearing;
 		const f1 = bearingForDOY(d + 1) - targetBearing;
 		const slope = f1 - f0;
-		if (Math.abs(slope) > 0.001) return d; // near solstice, barely changing
-		return d - f0 / slope;
+		if (Math.abs(slope) < 0.1) return d; // near solstice, barely changing
+		const step = f0 / slope;
+		if (Math.abs(step) > 15) return d;
+		return d - step;
 	}
 
 	const r1 = refine(d1);
 	const r2 = refine(d2);
 
-	// Return nearest upcoming occurrence
-	function nextOccurrence(doy) {
-		if (doy > todayDOY) return new Date(year, 0, Math.round(doy));
-		return new Date(year + 1, 0, Math.round(doy));
-	}
-
-	const date1 = nextOccurrence(r1);
-	const date2 = nextOccurrence(r2);
-	return date1 < date2 ? date1 : date2;
+	// Return nearest to reference date
+	const refDOY =
+		(referenceDate - new Date(referenceDate.getFullYear(), 0, 1)) / 86400000;
+	const dist1 = Math.min(Math.abs(r1 - refDOY), 365 - Math.abs(r1 - refDOY));
+	const dist2 = Math.min(Math.abs(r2 - refDOY), 365 - Math.abs(r2 - refDOY));
+	const bestDOY = dist1 < dist2 ? r1 : r2;
+	return new Date(referenceDate.getFullYear(), 0, Math.round(bestDOY));
 };
 
 // Meeus algorithm
@@ -133,21 +142,19 @@ dateInput.type = "date";
 dateInput.className = "season-date";
 dateInput.value = new Date().toISOString().split("T")[0];
 
-slider.addEventListener("input", () => {
-	const date = sliderToDate(parseInt(slider.value, 10));
-	dateInput.value = date.toISOString().split("T")[0];
-	state.date = date;
-	updateHenge();
+slider.addEventListener("input", (e) => {
+	state.date = sliderToDate(parseInt(e.target.value, 10));
+	// dateInput.value = date.toISOString().split("T")[0];
+	setDate(state.date);
+	render();
 });
 
 const dateContainer = document.createElement("div");
 dateContainer.className = "date-container";
 
-dateInput.addEventListener("input", () => {
-	const date = new Date(`${dateInput.value}T12:00:00`);
-	slider.value = dateToSlider(date);
-	state.date = date;
-	updateHenge();
+dateInput.addEventListener("input", (e) => {
+	setDate(new Date(`${e.target.value}T12:00:00`));
+	render();
 });
 
 const nowButton = document.createElement("button");
@@ -155,10 +162,8 @@ nowButton.innerText = "Now";
 
 nowButton.addEventListener("click", () => {
 	const date = new Date();
-	slider.value = dateToSlider(date);
-	dateInput.value = date.toISOString().split("T")[0];
-	state.date = date;
-	updateHenge();
+	setDate(date);
+	render();
 });
 
 dateContainer.append(dateInput, nowButton);
@@ -170,7 +175,7 @@ resetMarkerButton.type = "button";
 resetMarkerButton.addEventListener("click", () => {
 	state.lngLat = map.getCenter();
 	centerMarker.setLngLat(state.lngLat);
-	updateHenge();
+	render();
 });
 
 const version = document.createElement("small");
@@ -188,8 +193,8 @@ headerContainer.append(
 );
 
 function setDate(incomingDate) {
-	// const incomingDate = new Date(date);
 	if (!incomingDate) return;
+	state.date = incomingDate;
 	slider.value = dateToSlider(incomingDate);
 	dateInput.value = incomingDate.toISOString().split("T")[0];
 }
@@ -224,15 +229,15 @@ const map = new maplibregl.Map({
 	},
 });
 
-const centerMarker = new maplibregl.Marker({ draggable: true })
-	.setLngLat(stoneHenge)
-	.addTo(map);
+// const centerMarker = new maplibregl.Marker({ draggable: true })
+// 	.setLngLat(stoneHenge)
+// 	.addTo(map);
 
-const sunriseMarker = new maplibregl.Marker({ draggable: true });
+// const sunriseMarker = new maplibregl.Marker({ draggable: true });
 // .setLngLat(new maplibregl.LngLat())
 // .addTo(map);
 
-const sunsetMarker = new maplibregl.Marker({ draggable: true });
+// const sunsetMarker = new maplibregl.Marker({ draggable: true });
 // .setLngLat(new maplibregl.LngLat(sunsetPoint))
 // .addTo(map);
 
@@ -274,18 +279,24 @@ function getBearing({ time, center }) {
 }
 function getBearingLine({ time, center, properties = {} }) {
 	const bearing = getBearing({ time, center });
-	const origin = turf.point(center.toArray());
+	const origin = turf.point(center.toArray(), properties);
 
-	const horizonPoint = turf.destination(origin, state.bearingLength, bearing, {
-		units: "kilometers",
-	});
-
-	const azimuthLine = turf.greatCircle(
-		center.toArray(),
-		horizonPoint.geometry.coordinates,
+	const horizonPoint = turf.rhumbDestination(
+		origin,
+		state.bearingLength,
+		bearing,
 		{
+			units: "kilometers",
 			properties,
 		},
+	);
+
+	// console.log("horizonPoint", horizonPoint);
+	// console.log("center", center.toArray());
+
+	const azimuthLine = turf.lineString(
+		[center.toArray(), horizonPoint.geometry.coordinates],
+		properties,
 	);
 
 	return { bearing, horizonPoint, azimuthLine };
@@ -299,32 +310,37 @@ function getOverlayGeometry({
 	if (!date) return;
 	const times = SunCalc.getTimes(date, center.lat, center.lng, elevation);
 	const summerSolsticeTimes = SunCalc.getTimes(
-		getSolstice(2026, "summer"),
+		getSolstice(date.getFullYear(), "summer"),
 		center.lat,
 		center.lng,
 		elevation,
 	);
 	const winterSolsticeTimes = SunCalc.getTimes(
-		getSolstice(2026, "winter"),
+		getSolstice(date.getFullYear(), "winter"),
 		center.lat,
 		center.lng,
 		elevation,
 	);
 	// console.log("times", times);
-	state.times = times;
 
-	const { azimuthLine: sunriseAzimuthLine, horizonPoint: sunrisePoint } =
-		getBearingLine({
-			time: times.sunrise,
-			center,
-			properties: { type: "sunrise" },
-		});
-	const { azimuthLine: sunsetAzimuthLine, horizonPoint: sunsetPoint } =
-		getBearingLine({
-			time: times.sunset,
-			center,
-			properties: { type: "sunset" },
-		});
+	const {
+		azimuthLine: sunriseAzimuthLine,
+		bearing: sunriseBearing,
+		horizonPoint: sunrisePoint,
+	} = getBearingLine({
+		time: times.sunrise,
+		center,
+		properties: { type: "sunrise" },
+	});
+	const {
+		azimuthLine: sunsetAzimuthLine,
+		bearing: sunsetBearing,
+		horizonPoint: sunsetPoint,
+	} = getBearingLine({
+		time: times.sunset,
+		center,
+		properties: { type: "sunset" },
+	});
 	const { bearing: sunsetMaxBearing } = getBearingLine({
 		time: summerSolsticeTimes.sunset,
 		center,
@@ -350,8 +366,8 @@ function getOverlayGeometry({
 		const R = 6371000; // meters
 		return Math.sqrt(2 * R * elevationMeters) / 1000; //kim
 	}
-
-	const c = turf.point(center.toArray());
+	// console.log("sunrisePoint", sunrisePoint);
+	const c = turf.point(center.toArray(), { type: "center" });
 
 	const horizonCircle = turf.circle(c, horizonRadius(2), {
 		units: "kilometers",
@@ -368,43 +384,60 @@ function getOverlayGeometry({
 	// 		type: "azimuthLimitCircle",
 	// 	},
 	// });
+	function rhumbArc(center, radius, bearing1, bearing2, steps = 64) {
+		const coords = [];
+		const step = (bearing2 - bearing1) / steps;
+		for (let i = 0; i <= steps; i++) {
+			const bearing = bearing1 + i * step;
+			const pt = turf.rhumbDestination(center, radius, bearing, {
+				units: "kilometers",
+			});
+			// console.log("pt", pt);
+			coords.push(pt.geometry.coordinates);
+		}
+		return coords;
+	}
 
-	const sunsetRangeArc = turf.lineArc(
+	// const sunsetRangeArc = turf.lineArc(
+	// 	c,
+	// 	state.bearingLength,
+	// 	sunsetMinBearing,
+	// 	sunsetMaxBearing,
+	// );
+
+	// const sunriseRangeArc = turf.lineArc(
+	// 	c,
+	// 	state.bearingLength,
+	// 	sunriseMaxBearing,
+	// 	sunriseMinBearing,
+	// );
+
+	const sunsetArcCoords = rhumbArc(
 		c,
 		state.bearingLength,
-		sunsetMinBearing,
 		sunsetMaxBearing,
+		sunsetMinBearing,
 	);
 
-	const sunriseRangeArc = turf.lineArc(
-		c,
-		state.bearingLength,
-		sunriseMaxBearing,
-		sunriseMinBearing,
-	);
+	// console.log("sunsetArcCoords", sunsetArcCoords);
 
 	const sunsetRangePolygon = turf.polygon(
-		[
-			[
-				center.toArray(),
-				...sunsetRangeArc.geometry.coordinates,
-				center.toArray(),
-			],
-		],
+		[[center.toArray(), ...sunsetArcCoords, center.toArray()]],
 		{
 			type: "sunsetRange",
 			maxBearing: sunsetMaxBearing,
 			minBearing: sunsetMinBearing,
 		},
 	);
+
+	const sunriseArcCoords = rhumbArc(
+		c,
+		state.bearingLength,
+		sunriseMaxBearing,
+		sunriseMinBearing,
+	);
 	const sunriseRangePolygon = turf.polygon(
-		[
-			[
-				center.toArray(),
-				...sunriseRangeArc.geometry.coordinates,
-				center.toArray(),
-			],
-		],
+		[[center.toArray(), ...sunriseArcCoords, center.toArray()]],
 		{
 			type: "sunriseRange",
 			maxBearing: sunriseMaxBearing,
@@ -413,21 +446,24 @@ function getOverlayGeometry({
 	);
 
 	const geojson = turf.featureCollection([
+		c,
 		sunriseAzimuthLine,
 		sunsetAzimuthLine,
 		horizonCircle,
+		sunrisePoint,
+		sunsetPoint,
 		sunsetRangePolygon,
 		sunriseRangePolygon,
 	]);
 
 	return {
 		geojson,
+		sunriseBearing,
+		sunsetBearing,
 		sunriseMinBearing,
 		sunriseMaxBearing,
 		sunsetMinBearing,
 		sunsetMaxBearing,
-		sunrisePoint,
-		sunsetPoint,
 	};
 }
 
@@ -439,140 +475,223 @@ map.addControl(
 	}),
 );
 
-map.on("load", async () => {
-	map.addSource("sun-lines", {
+const canvas = map.getCanvasContainer();
+
+function onMove(e, feature) {
+	const coords = e.lngLat;
+	// console.log("e", e);
+	console.log("feature", feature);
+	canvas.style.cursor = "grabbing";
+	const type = feature.properties.type;
+	console.log("type", type);
+	if (type === "sunset" || type === "sunrise") {
+		onAzimuthDragEnd(e, type);
+	} else if (type === "center") {
+		state.lngLat = e.lngLat;
+		render();
+	}
+	// azimuthDragEnd(e);
+	console.log("moving point", coords);
+}
+
+function onUp(e) {
+	canvas.style.cursor = "";
+}
+
+map.on("load", () => {
+	map.addSource("solar-features", {
 		type: "geojson",
 		data: {},
 	});
 	map.addLayer({
 		id: "sun-lines",
 		type: "line",
-		source: "sun-lines",
+		source: "solar-features",
 		paint: { "line-color": "#ff6600", "line-width": 2 },
 	});
-
-	updateHenge();
-
-	const overlayGeometry = await map.getSource("sun-lines").getData();
-
-	// console.log("overlayGeometry", overlayGeometry);
-
-	const sunsetCoordArray = overlayGeometry.features.find(
-		(f) => f.properties.type === "sunset",
-	).geometry.coordinates;
-	const sunriseCoordArray = overlayGeometry.features.find(
-		(f) => f.properties.type === "sunrise",
-	).geometry.coordinates;
-
-	sunsetMarker.setLngLat(
-		new maplibregl.LngLat(...sunsetCoordArray[sunsetCoordArray.length - 1]),
-	);
-
-	sunriseMarker.setLngLat(
-		new maplibregl.LngLat(...sunriseCoordArray[sunsetCoordArray.length - 1]),
-	);
-
-	function horizonPointHandler(e, type) {
-		const bearing = turf.bearing(
-			state.lngLat.toArray(),
-			e.target.getLngLat().toArray(),
-		);
-		const clampedBearing = clampBearing(
-			bearing,
-			state[`${type}MinBearing`],
-			state[`${type}MaxBearing`],
-		);
-		// console.log("clampledBearing", clampedBearing);
-		// console.log(state);
-		// const atTerminus =
-		// 	bearing > state[`${type}MinBearing`] ||
-		// 	bearing < state[`${type}MaxBearing`];
-		// console.log("atTerminus", atTerminus);
-		// if (atTerminus) return;
-
-		const snapped = turf.destination(
-			state.lngLat.toArray(),
-			state.bearingLength,
-			clampedBearing,
-			{ units: "kilometers" },
-		);
-
-		e.target.setLngLat(snapped.geometry.coordinates);
-
-		state.date = SunCalc.getDateForAzimuth(
-			clampedBearing,
-			state.lngLat.lat,
-			state.lngLat.lng,
-			type,
-		);
-		setDate(state.date);
-		updateHenge();
-	}
-
-	function clampBearing(bearing, a, b) {
-		bearing = ((bearing % 360) + 360) % 360; // normalize
-		const lo = Math.min(a, b);
-		const hi = Math.max(a, b);
-		if (bearing >= lo && bearing <= hi) return bearing;
-
-		const distToMin = Math.min(
-			Math.abs(bearing - lo),
-			360 - Math.abs(bearing - lo),
-		);
-		const distToMax = Math.min(
-			Math.abs(bearing - hi),
-			360 - Math.abs(bearing - hi),
-		);
-		return distToMin < distToMax ? lo : hi;
-	}
-
-	sunriseMarker.addTo(map).on("drag", (e) => horizonPointHandler(e, "sunrise"));
-	sunsetMarker.addTo(map).on("drag", (e) => horizonPointHandler(e, "sunset"));
-
-	sunriseMarker
-		.addTo(map)
-		.on("dragend", (e) => horizonPointHandler(e, "sunrise"));
-	sunsetMarker
-		.addTo(map)
-		.on("dragend", (e) => horizonPointHandler(e, "sunset"));
-	centerMarker.on("drag", (e) => {
-		// console.log("drag fired");
-		state.lngLat = e.target.getLngLat();
-		updateHenge();
+	map.addLayer({
+		id: "azimuth-points",
+		type: "circle",
+		source: "solar-features",
+		filter: [
+			"all",
+			["in", ["get", "type"], ["literal", ["sunrise", "sunset", "center"]]],
+			["==", ["geometry-type"], "Point"],
+		],
+		paint: {
+			"circle-radius": 10,
+			"circle-color": "#ff6600",
+		},
 	});
+
+	// map.addLayer({
+	// 	id: "center-point",
+	// 	type: "circle",
+	// 	source: "sun-lines",
+	// 	filter: ["in", ["get", "type"], ["literal", ["center"]]],
+	// 	paint: {
+	// 		"circle-radius": 20,
+	// 		"circle-color": "#ee5511",
+	// 	},
+	// });
+	// sunriseMarker.addTo(map);
+	// sunsetMarker.addTo(map);
+	//
+	map.on("mouseenter", "azimuth-points", () => {
+		map.setPaintProperty("azimuth-points", "circle-color", "#ff5500");
+		canvas.style.cursor = "move";
+	});
+
+	map.on("mouseleave", "azimuth-points", () => {
+		map.setPaintProperty("azimuth-points", "circle-color", "#ff6600");
+		canvas.style.cursor = "";
+	});
+
+	const pointHandler = (e) => {
+		e.preventDefault();
+		console.log("e", e);
+		const features = map.queryRenderedFeatures(e.point, {
+			layers: ["azimuth-points"],
+		});
+		if (!features.length) return;
+		// console.log("e", e);
+
+		const feature = features[0];
+
+		const handleMove = (e) => {
+			return onMove(e, feature);
+		};
+
+		// const handleUp = (e) => {
+		// 	return onUp(e, feature);
+		// };
+		// console.log("features", features);
+		canvas.style.cursor = "grab";
+		map.on("mousemove", handleMove);
+		map.once("mouseup", () => {
+			map.off("mousemove", handleMove);
+			onUp();
+		});
+		map.on("touchmove", handleMove);
+		map.once("touchend", () => {
+			map.off("touchmove", handleMove);
+			onUp();
+		});
+	};
+
+	map.on("mousedown", "azimuth-points", pointHandler);
+
+	map.on("touchstart", "azimuth-points", (e) => {
+		console.log("e", e);
+		if (e.points.length !== 1) return;
+		pointHandler(e);
+	});
+
+	render();
 });
 
-function updateHenge() {
+// event handler for points
+
+function onAzimuthDrag(marker, type) {
+	// console.log("marker", marker);
+	const bearing = turf.bearing(state.lngLat.toArray(), marker.lngLat.toArray());
+
+	const clampedBearing = clampBearing(
+		bearing,
+		state[`${type}MinBearing`],
+		state[`${type}MaxBearing`],
+	);
+
+	state[`${type}Bearing`] = clampedBearing;
+
+	// positionMarkerAtBearing(marker, clampedBearing, state.bearingPixelRadius);
+	return { clampedBearing };
+}
+
+function onAzimuthDragEnd(marker, type) {
+	const { clampedBearing } = onAzimuthDrag(marker, type);
+	state.date = SunCalc.getDateForAzimuth(
+		clampedBearing,
+		state.lngLat.lat,
+		state.lngLat.lng,
+		type,
+		state.date,
+	);
+	setDate(state.date);
+	render();
+}
+
+function clampBearing(bearing, a, b) {
+	bearing = ((bearing % 360) + 360) % 360; // normalize
+	const lo = Math.min(a, b);
+	const hi = Math.max(a, b);
+	if (bearing >= lo && bearing <= hi) return bearing;
+
+	const distToMin = Math.min(
+		Math.abs(bearing - lo),
+		360 - Math.abs(bearing - lo),
+	);
+	const distToMax = Math.min(
+		Math.abs(bearing - hi),
+		360 - Math.abs(bearing - hi),
+	);
+	return distToMin < distToMax ? lo : hi;
+}
+
+// sunriseMarker.on("drag", (e) => onAzimuthDrag(e.target, "sunrise"));
+// sunsetMarker.on("drag", (e) => onAzimuthDrag(e.target, "sunset"));
+// sunriseMarker.on("dragend", (e) => {
+// 	onAzimuthDragEnd(e.target, "sunrise");
+// });
+// sunsetMarker.on("dragend", (e) => {
+// 	onAzimuthDragEnd(e.target, "sunset");
+// });
+
+// centerMarker.on("drag", (e) => {
+// 	// console.log("drag fired");
+// 	state.lngLat = e.target.getLngLat();
+// 	render();
+// });
+
+map.on("move", () => {
+	// positionMarkerAtBearing(
+	// 	sunriseMarker,
+	// 	state.sunriseBearing,
+	// 	state.bearingPixelRadius,
+	// );
+	// positionMarkerAtBearing(
+	// 	sunsetMarker,
+	// 	state.sunsetBearing,
+	// 	state.bearingPixelRadius,
+	// );
+});
+
+function render() {
 	const { date, lngLat, elevation } = state;
 	if (!date) return;
-	const {
-		geojson,
-		sunriseMinBearing,
-		sunriseMaxBearing,
-		sunsetMinBearing,
-		sunsetMaxBearing,
-		sunsetPoint,
-		sunrisePoint,
-	} = getOverlayGeometry({
-		date,
-		center: lngLat,
-		elevation,
-	});
-	Object.assign(state, {
-		sunriseMinBearing,
-		sunriseMaxBearing,
-		sunsetMinBearing,
-		sunsetMaxBearing,
-	});
-	// console.log("sunrisePoint", sunrisePoint);
-	sunriseMarker
-		.setLngLat(new maplibregl.LngLat(...sunrisePoint.geometry.coordinates))
-		.setDraggable(true);
-	sunsetMarker
-		.setLngLat(new maplibregl.LngLat(...sunsetPoint.geometry.coordinates))
-		.setDraggable(true);
-	// console.log("overlayGeometry", overlayGeometry);
-	map.getSource("sun-lines").setData(geojson);
+	const { geojson, sunriseBearing, sunsetBearing, ...bearings } =
+		getOverlayGeometry({
+			date,
+			center: lngLat,
+			elevation,
+		});
+
+	// console.log("bearings", bearings);
+	console.log("geojson", geojson);
+	Object.assign(state, { sunriseBearing, sunsetBearing, ...bearings });
+
+	map.getSource("solar-features").setData(geojson);
+
+	// positionMarkerAtBearing(
+	// 	sunriseMarker,
+	// 	sunriseBearing,
+	// 	state.bearingPixelRadius,
+	// );
+	// positionMarkerAtBearing(
+	// 	sunsetMarker,
+	// 	sunsetBearing,
+	// 	state.bearingPixelRadius,
+	// );
 }
 
 // map.addControl(
