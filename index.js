@@ -6,7 +6,7 @@ const turf = window.turf;
 
 // initial point
 const stoneHenge = new maplibregl.LngLat(-1.825819, 51.179203);
-const version = "0.5.2";
+const version = "0.5.3";
 
 // initial state
 const state = {
@@ -175,7 +175,7 @@ resetMarkerButton.type = "button";
 
 resetMarkerButton.addEventListener("click", () => {
 	state.lngLat = map.getCenter();
-	centerMarker.setLngLat(state.lngLat);
+	// centerMarker.setLngLat(state.lngLat);
 	render();
 });
 
@@ -478,12 +478,12 @@ map.addControl(
 const canvas = map.getCanvasContainer();
 
 function onMove(e, feature) {
-	const coords = e.lngLat;
+	// const coords = e.lngLat;
 	// console.log("e", e);
 	console.log("feature", feature);
 	canvas.style.cursor = "grabbing";
 	const type = feature.properties.type;
-	console.log("type", type);
+	// console.log("type", type);
 	if (type === "sunset" || type === "sunrise") {
 		onAzimuthDragEnd(e, type);
 	} else if (type === "center") {
@@ -491,10 +491,10 @@ function onMove(e, feature) {
 		render();
 	}
 	// azimuthDragEnd(e);
-	console.log("moving point", coords);
+	// console.log("moving point", coords);
 }
 
-function onUp(e) {
+function onUp() {
 	canvas.style.cursor = "";
 }
 
@@ -549,7 +549,7 @@ map.on("load", () => {
 
 	const pointHandler = (e) => {
 		e.preventDefault();
-		console.log("e", e);
+		// console.log("e", e);
 		const features = map.queryRenderedFeatures(e.point, {
 			layers: ["azimuth-points"],
 		});
@@ -582,7 +582,7 @@ map.on("load", () => {
 	map.on("mousedown", "azimuth-points", pointHandler);
 
 	map.on("touchstart", "azimuth-points", (e) => {
-		console.log("e", e);
+		// console.log("e", e);
 		if (e.points.length !== 1) return;
 		pointHandler(e);
 	});
@@ -677,7 +677,7 @@ function render() {
 		});
 
 	// console.log("bearings", bearings);
-	console.log("geojson", geojson);
+	// console.log("geojson", geojson);
 	Object.assign(state, { sunriseBearing, sunsetBearing, ...bearings });
 
 	map.getSource("solar-features").setData(geojson);
