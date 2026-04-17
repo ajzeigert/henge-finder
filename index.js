@@ -6,6 +6,7 @@ const turf = window.turf;
 
 // initial point
 const stoneHenge = new maplibregl.LngLat(-1.825819, 51.179203);
+const version = "0.5.2";
 
 // initial state
 const state = {
@@ -178,9 +179,8 @@ resetMarkerButton.addEventListener("click", () => {
 	render();
 });
 
-const version = document.createElement("small");
-version.innerHTML =
-	"Version 0.5.1 | © 2026 <a href='https://mastodon.social/@zeigert'>@zeigert</a>";
+const versionEl = document.createElement("small");
+versionEl.innerHTML = `Version ${version} | © 2026 <a href='https://mastodon.social/@zeigert'>@zeigert</a>`;
 
 headerContainer.append(
 	header,
@@ -189,7 +189,7 @@ headerContainer.append(
 	dataList,
 	dateContainer,
 	resetMarkerButton,
-	version,
+	versionEl,
 );
 
 function setDate(incomingDate) {
