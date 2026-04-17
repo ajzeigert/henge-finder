@@ -6,7 +6,7 @@ const turf = window.turf;
 
 // initial point
 const stoneHenge = new maplibregl.LngLat(-1.825819, 51.179203);
-const version = "0.5.4";
+const version = "0.5.5";
 
 // initial state
 const state = {
