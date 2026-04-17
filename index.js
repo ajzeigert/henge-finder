@@ -6,8 +6,19 @@ const turf = window.turf;
 
 // initial point
 const stoneHenge = new maplibregl.LngLat(-1.825819, 51.179203);
-const version = "0.5.5";
+const version = "0.5.6";
 
+const colors = {
+	mossGreen: "#5a6b3a",
+	sunlitGrass: "#7c8a5e",
+	warmStraw: "#c9b87a",
+	goldenHaze: "#e8d5a0",
+	sandstone: "#c48a4a",
+	amber: "#d9944f",
+	weatheredRed: "#8b4a3a",
+	terracotta: "#a35540",
+	shirtBlue: "#3B899D",
+};
 // initial state
 const state = {
 	date: new Date(),
@@ -254,13 +265,13 @@ map.setStyle("https://tiles.openfreemap.org/styles/bright", {
 	},
 });
 
-function bearingToLngLat(bearing) {
+function bearingToLngLat(bearing, radius) {
 	const centerPx = map.project(state.lngLat);
 	const rad = (bearing * Math.PI) / 180;
 	return map
 		.unproject({
-			x: centerPx.x + state.bearingPixelRadius * Math.sin(rad),
-			y: centerPx.y - state.bearingPixelRadius * Math.cos(rad),
+			x: centerPx.x + radius * Math.sin(rad),
+			y: centerPx.y - radius * Math.cos(rad),
 		})
 		.toArray();
 }
@@ -271,13 +282,18 @@ function getBearing({ time, center }) {
 }
 function getBearingLine({ time, center, properties = {} }) {
 	const bearing = getBearing({ time, center });
-	const endCoords = bearingToLngLat(bearing);
+	const bearingEndCoords = bearingToLngLat(bearing, state.bearingPixelRadius);
+	const { width, height } = map.getCanvas();
+	const maxRadius = Math.sqrt(width * width + height * height);
+	// console.log("maxRadius", maxRadius);
+	const azimuthEndCoords = bearingToLngLat(bearing, maxRadius);
+	// console.log("azimuthEndCoords", azimuthEndCoords);
 	const azimuthLine = turf.lineString(
-		[center.toArray(), endCoords],
+		[center.toArray(), azimuthEndCoords],
 		properties,
 	);
-	const horizonPoint = turf.point(endCoords, properties);
-	return { bearing, horizonPoint, azimuthLine };
+	const bearingPoint = turf.point(bearingEndCoords, properties);
+	return { bearing, bearingPoint, azimuthLine };
 }
 
 function getOverlayGeometry({
@@ -303,7 +319,7 @@ function getOverlayGeometry({
 	const {
 		azimuthLine: sunriseAzimuthLine,
 		bearing: sunriseBearing,
-		horizonPoint: sunrisePoint,
+		bearingPoint: sunrisePoint,
 	} = getBearingLine({
 		time: times.sunrise,
 		center,
@@ -312,7 +328,7 @@ function getOverlayGeometry({
 	const {
 		azimuthLine: sunsetAzimuthLine,
 		bearing: sunsetBearing,
-		horizonPoint: sunsetPoint,
+		bearingPoint: sunsetPoint,
 	} = getBearingLine({
 		time: times.sunset,
 		center,
@@ -345,19 +361,23 @@ function getOverlayGeometry({
 	}
 	const c = turf.point(center.toArray(), { type: "center" });
 
-	const horizonCircle = turf.circle(c, horizonRadius(2), {
-		units: "kilometers",
-		steps: 64,
-		properties: {
-			type: "horizon",
-		},
-	});
+	const horizonCircle = turf.polygonToLine(
+		turf.circle(c, horizonRadius(2), {
+			units: "kilometers",
+			steps: 64,
+			properties: {
+				type: "horizon",
+			},
+		}),
+	);
 
 	function screenArc(bearing1, bearing2, steps = 64) {
 		const coords = [];
 		const step = (bearing2 - bearing1) / steps;
 		for (let i = 0; i <= steps; i++) {
-			coords.push(bearingToLngLat(bearing1 + i * step));
+			coords.push(
+				bearingToLngLat(bearing1 + i * step, state.bearingPixelRadius),
+			);
 		}
 		return coords;
 	}
@@ -439,7 +459,42 @@ map.on("load", () => {
 		id: "sun-lines",
 		type: "line",
 		source: "solar-features",
-		paint: { "line-color": "#ff6600", "line-width": 2 },
+		filter: ["==", ["geometry-type"], "LineString"],
+		paint: {
+			"line-color": [
+				"match",
+				["get", "type"],
+				"horizon",
+				colors.shirtBlue,
+				"sunrise",
+				colors.goldenHaze,
+				"sunset",
+				colors.sandstone,
+				colors.warmStraw,
+			],
+			"line-width": ["match", ["get", "type"], "horizon", 3, 2],
+			"line-dasharray": [4, 2],
+		},
+	});
+	map.addLayer({
+		id: "sun-polygons",
+		type: "fill",
+		source: "solar-features",
+		filter: ["==", ["geometry-type"], "Polygon"],
+		paint: {
+			"fill-color": [
+				"match",
+				["get", "type"],
+				// "horizon",
+				// "rgba(0,0,0,0)",
+				"sunriseRange",
+				colors.goldenHaze,
+				"sunsetRange",
+				colors.warmStraw,
+				colors.warmStraw,
+			],
+			"fill-opacity": 0.5,
+		},
 	});
 	map.addLayer({
 		id: "azimuth-points",
@@ -452,17 +507,28 @@ map.on("load", () => {
 		],
 		paint: {
 			"circle-radius": 10,
-			"circle-color": "#ff6600",
+			"circle-color": [
+				"match",
+				["get", "type"],
+				"center",
+				colors.shirtBlue,
+				"sunrise",
+				colors.goldenHaze,
+				"sunet",
+				colors.terracotta,
+				colors.sandstone,
+			],
 		},
 	});
 
 	map.on("mouseenter", "azimuth-points", () => {
-		map.setPaintProperty("azimuth-points", "circle-color", "#ff5500");
+		// map.setPaintProperty("azimuth-points", "circle-color", colors.weatheredRed);
 		canvas.style.cursor = "move";
 	});
 
 	map.on("mouseleave", "azimuth-points", () => {
-		map.setPaintProperty("azimuth-points", "circle-color", "#ff6600");
+		// map.setPaintProperty("azimuth-points", "circle-color", "unset");
+		render();
 		canvas.style.cursor = "";
 	});
 
@@ -497,6 +563,10 @@ map.on("load", () => {
 	map.on("touchstart", "azimuth-points", (e) => {
 		if (e.points.length !== 1) return;
 		pointHandler(e);
+	});
+
+	map.on("move", () => {
+		render();
 	});
 
 	render();
@@ -548,10 +618,6 @@ function clampBearing(bearing, a, b) {
 	return distToMin < distToMax ? lo : hi;
 }
 
-map.on("move", () => {
-	render();
-});
-
 function render() {
 	const { date, lngLat, elevation } = state;
 	if (!date) return;
@@ -563,7 +629,7 @@ function render() {
 		});
 
 	Object.assign(state, { sunriseBearing, sunsetBearing, ...bearings });
-
+	// console.log("geojson", geojson);
 	map.getSource("solar-features").setData(geojson);
 }
 
@@ -573,3 +639,4 @@ function render() {
 // 		exaggeration: 1,
 // 	}),
 // );
+//
