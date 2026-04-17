@@ -13,7 +13,7 @@
 - [x] Add all the share card stuff and a favicon
 - [ ] Add search bar
 - [ ] Add a drop down that will whoosh to a bunch of famous henges on earth, both time and date
-- [ ] Maybe the map control becomes a top bar instead?
+- [x] Maybe the map control becomes a top bar instead?
 - [ ] Show sunset and sunrise times as labels or somewhere on the map
 - [ ] Add an about section? What is this thing? Why is this thing?
 - [ ] Save points/times?
@@ -21,4 +21,4 @@
 - [ ] Poster generator?
 - [ ] Hash link to time/place
 - [ ] Download calendar .ico file with link?
-- [ ] Custom fonts (Space Grotesk and DM Sans?)
+- [x] Custom fonts (Space Grotesk and DM Sans?)
