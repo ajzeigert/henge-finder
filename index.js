@@ -6,7 +6,7 @@ const turf = window.turf;
 
 // initial point
 const stoneHenge = new maplibregl.LngLat(-1.825819, 51.179203);
-const version = "0.5.3";
+const version = "0.5.4";
 
 // initial state
 const state = {
@@ -71,12 +71,11 @@ SunCalc.getDateForAzimuth = (
 	const r2 = refine(d2);
 
 	// Return nearest to reference date
-	const refDOY =
-		(referenceDate - new Date(referenceDate.getFullYear(), 0, 1)) / 86400000;
+	const refDOY = (referenceDate - new Date(year, 0, 1)) / 86400000;
 	const dist1 = Math.min(Math.abs(r1 - refDOY), 365 - Math.abs(r1 - refDOY));
 	const dist2 = Math.min(Math.abs(r2 - refDOY), 365 - Math.abs(r2 - refDOY));
 	const bestDOY = dist1 < dist2 ? r1 : r2;
-	return new Date(referenceDate.getFullYear(), 0, Math.round(bestDOY));
+	return new Date(year, 0, Math.round(bestDOY));
 };
 
 // Meeus algorithm
@@ -480,7 +479,7 @@ const canvas = map.getCanvasContainer();
 function onMove(e, feature) {
 	// const coords = e.lngLat;
 	// console.log("e", e);
-	console.log("feature", feature);
+	// console.log("feature", feature);
 	canvas.style.cursor = "grabbing";
 	const type = feature.properties.type;
 	// console.log("type", type);
